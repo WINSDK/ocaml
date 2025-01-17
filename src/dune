@@ -1,6 +1,6 @@
 (executable
  (public_name problems)
- (name main)
+ (name problems)
  (libraries base core core_unix.command_unix core_unix.time_float_unix stdio))
 (env
  (dev

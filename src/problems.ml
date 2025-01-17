@@ -2,12 +2,57 @@ open !Core
 open Stdio
 
 (*
+  Watch & Reading list:
+  * Real world ocaml
+    - https://dev.realworldocaml.org
+  * Learn ocaml workshop
+    - https://github.com/janestreet/learn-ocaml-workshop
+  * Effective ML 2011
+    - https://www.youtube.com/watch?v=4l16sYRpfL8
+  * Writing a game body emulator in ocaml
+    - https://linoscope.github.io/writing-a-game-boy-emulator-in-ocaml
+
+  Write interfaces (don't just assume FP and type inference is good enough).
+  It doesn't matter if you think you need it, write one.
+  Make them uniform, same kinds of pattern (List.map, t.map).
+
+  ```ocaml
+  module Vec = struct
+    type t = float array [@@deriving sexp]
+
+    let copy = Array.copy
+    let create0 len = Array.create ~len 0.
+    let sumsq t = ...;;
+    let norm t = sqrt (sumsq t)
+
+    module Map : Core_mapjbjc
+  end
+  ```
+
+  When you do write a module then, add a `type t` and use that in it's function signatures.
+
+  When both of your match branches return different types, the compiler assumes
+  you must be returning the first type. This is incorrect, it doesn't know this but it
+  assumes so instead of displaying an error related to mismatching types.
+
   General notes about what not to do in ocaml:
   - Don't use *polymorpic variants* and definitely don't use the object system.
 *)
 
 (* Any kind of time operations using jane street's libs require this. *)
 module Time = Time_float_unix
+
+module Vec = struct
+  type t = int array
+
+  let to_string x =
+    let repr = x
+       |> Array.map ~f:string_of_int
+       |> String.concat_array ~sep:"; " in
+    Printf.sprintf "int vec [| %s |]" repr
+
+  let of_string _s = [| 1; 2; 3 |]  (* just an example *)
+end
 
 let rec last xs =
   match xs with
@@ -83,6 +128,16 @@ let rec duplicate xs =
     | [] -> []
     | x :: xs -> x :: x :: duplicate xs;;
 
+let rec remove_dup = function
+  | [] | [_] as l -> l (* Avoid allocation by returning original list *)
+  (*
+    (=) is an int comparison in Core, so `remove_dup` will specialize to int list.
+    Therefore we use Poly.(x = y) for polymorphic comparison to keep `remove_dup` generic.
+  *)
+  | x :: (y :: _ as tl) when Poly.(x = y) -> remove_dup tl
+  | x :: tl -> x :: remove_dup tl
+;;
+
 let remove_at idx xs =
   let rec aux idx xs acc =
     match xs with
@@ -143,7 +198,7 @@ let permutation xs =
       let (x, xs) = take xs [] rand_idx in
       aux xs (x :: acc) (len - 1)
   in
-  aux xs [] (List.length xs)
+  aux xs [] (List.length xs) (* List.length takes O(n) time as it's a linked list *)
 ;;
 
 let rec gcd a b =
@@ -275,6 +330,20 @@ let max_of_min3_and = Int.max (-3);;
 
 (* f (g (h x)) == f @@ g @@ h x *)
 
+module Thing = struct
+  type t = {
+    x: int;
+    y: string;
+  }
+  [@@deriving fields ~getters, sexp]
+
+  (*
+    We must add a `()` as the final argument because the compiler otherwise can't figure out if
+    this is a function when no params are passed.
+  *)
+  let create ?(x = 10) ?(y = "you think?") () = { x; y };;
+end
+
 let main () =
   let arr = [|1; 3; 5|] in
   (*
@@ -283,6 +352,12 @@ let main () =
   *)
   memset_100 arr;
   printf "%d\n" arr.(0);
+
+  let xy : Thing.t = { x = 10; y = "lol" } in
+  printf "%d %s\n" xy.x xy.y;
+
+  let xy = Thing.create ~x:123 () in
+  printf "%d %s\n" xy.x xy.y;
 
   let path = "/usr/bin:/usr/local/bin:/bin:/sbin:/usr/bin" in
   String.split ~on:':' path
@@ -300,7 +375,24 @@ let main () =
   let x = Array.rev v in
   let _ = x.(Array.length x - 1) in (* Force `v` to be allocated. *)
   let time_taken = Time.diff (Time.now ()) t in
-  time_taken |> Time.Span.to_string |> printf "Took %s to List.rev.\n"
+  time_taken |> Time.Span.to_string |> printf "Took %s to List.rev.\n";
+
+  module Sys = Core.Sys
+  module Filename = Core.Filename;;
+  let rec ls_rec s =
+    if Sys_unix.is_file_exn ~follow_symlinks:true s
+    then [s]
+    else
+      Sys_unix.ls_dir s |> List.concat_map ~f:(fun sub -> ls_rec (Filename.concat s sub));;
+  List.iter (ls_rec "./src") ~f:print_endline;
+
+  printf "[";
+  List.iter (remove_dup [1; 2; 3; 5; 5; 9; 9]) ~f:(printf " %d");
+  printf " ]\n";
+
+  printf "[";
+  List.iter (remove_dup [1.0; 2.0]) ~f:(printf " %f");
+  printf " ]\n";
 ;;
 
 let readme () =
@@ -313,7 +405,7 @@ let readme () =
 let command =
   Command.basic
     ~summary:"Trying out ocaml"
-    ~readme:(fun () -> readme ())
+    ~readme
     (Command.Param.return main)
 ;;
 
