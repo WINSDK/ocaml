@@ -59,6 +59,18 @@ cleanup_runner() {
     fi
 }
 
+# Makes sure the -clear-columns flag is always set.
+flag_present=false
+for arg in "$@"; do
+    if [[ "$arg" == "-clear-columns" ]]; then
+        flag_present=true
+        break
+    fi
+done
+if [[ "$flag_present" = false ]]; then
+    set -- "-clear-columns" "$@"
+fi
+
 trap cleanup_runner EXIT
 setup_runner;
 
