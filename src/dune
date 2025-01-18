@@ -1,7 +1,11 @@
 (executable
  (public_name problems)
  (name problems)
- (libraries base core core_unix.command_unix core_unix.time_float_unix stdio))
+ (libraries base core core_unix.command_unix core_unix.time_float_unix stdio)
+ (preprocess
+  (pps ppx_jane))
+ (lint
+  (pps ppx_js_style -annotated-ignores -styler -pretty -dated-deprecation)))
 (env
  (dev
   (flags (:standard -w -32 -w -37 -warn-error -A)))

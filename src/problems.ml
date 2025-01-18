@@ -3,9 +3,10 @@ open Stdio
 
 (*
   Watch & Reading list:
+  *
   * Real world ocaml
     - https://dev.realworldocaml.org
-  * Learn ocaml workshop
+  * Learn ocaml workshop (slightly outdated)
     - https://github.com/janestreet/learn-ocaml-workshop
   * Effective ML 2011
     - https://www.youtube.com/watch?v=4l16sYRpfL8
@@ -37,21 +38,31 @@ open Stdio
 
   General notes about what not to do in ocaml:
   - Don't use *polymorpic variants* and definitely don't use the object system.
+
+  To ensure your opam dependencies (similar to requirements.txt in python) match the
+  current environment:
+    * opam install opam-dune-lint
+    * exec opam-dune-lint in project base directory
+
+  Probably use one monorepo for everything:
+  https://blog.janestreet.com/ironing-out-your-development-style/
 *)
 
 (* Any kind of time operations using jane street's libs require this. *)
 module Time = Time_float_unix
+module Sys = Core.Sys
+module Filename = Core.Filename;;
 
 module Vec = struct
   type t = int array
 
-  let to_string x =
+  let to_string (x: t): string =
     let repr = x
        |> Array.map ~f:string_of_int
        |> String.concat_array ~sep:"; " in
     Printf.sprintf "int vec [| %s |]" repr
 
-  let of_string _s = [| 1; 2; 3 |]  (* just an example *)
+  let of_string (_s: string): t = [| 1; 2; 3 |]  (* just an example *)
 end
 
 let rec last xs =
@@ -88,7 +99,7 @@ let rev xs =
   in
   aux xs;;
 
-let is_palindrome (xs: 'a list) = List.equal (=) (List.rev xs) xs;;
+let is_palindrome (xs: 'a list) = Poly.(List.rev xs = xs);;
 
 let encode xs =
   let rec aux xs pairs count =
@@ -247,7 +258,7 @@ let collect_leaves node =
   aux node []
 ;;
 
-(* *and* makes the type checker allow accessing `aux` backwardsly. *)
+(* *and* makes the type checker allow accessing `aux` backwardsly *)
 let rec at_level node lvl =
   aux node lvl []
 and aux node lvl acc =
@@ -305,7 +316,7 @@ let mul_float x y =
   x * y
 ;;
 
-(* With the `()` this wouldn't be a function, just a value that get's resolved by the top-level. *)
+(* With the `()` this wouldn't be a function, just a value that get's resolved by the top-level *)
 let read_flatten_stdin_all () =
   let rec aux acc =
     match In_channel.input_line In_channel.stdin with
@@ -325,10 +336,19 @@ let memset_100 (xs: int array) =
   done
 ;;
 
-(* You must wrap every negation in a (..) due to operator precedence. *)
+(* You must wrap every negation in a (..) due to operator precedence *)
 let max_of_min3_and = Int.max (-3);;
 
 (* f (g (h x)) == f @@ g @@ h x *)
+
+module AllFloats = struct
+  type t = {
+    x: float;
+    y: float;
+  }
+  [@@fields.no_zero_alloc] (* If your type is all floats, you may have to annotate with this *)
+  [@@deriving fields ~getters, sexp]
+end
 
 module Thing = struct
   type t = {
@@ -339,9 +359,12 @@ module Thing = struct
 
   (*
     We must add a `()` as the final argument because the compiler otherwise can't figure out if
-    this is a function when no params are passed.
+    this is a function when no parameters are passed.
+
+    You can also just annotate t with @@deriving field ~iterators:create.
+    This way you don't have to write a create function everytime.
   *)
-  let create ?(x = 10) ?(y = "you think?") () = { x; y };;
+  let create ?(x = 10) ?(y = "name") () = { x; y };;
 end
 
 let main () =
@@ -357,6 +380,7 @@ let main () =
   printf "%d %s\n" xy.x xy.y;
 
   let xy = Thing.create ~x:123 () in
+  let xy = { xy with x = 321; } in (* Functionally update partial fields *)
   printf "%d %s\n" xy.x xy.y;
 
   let path = "/usr/bin:/usr/local/bin:/bin:/sbin:/usr/bin" in
@@ -377,22 +401,42 @@ let main () =
   let time_taken = Time.diff (Time.now ()) t in
   time_taken |> Time.Span.to_string |> printf "Took %s to List.rev.\n";
 
-  module Sys = Core.Sys
-  module Filename = Core.Filename;;
   let rec ls_rec s =
     if Sys_unix.is_file_exn ~follow_symlinks:true s
     then [s]
     else
-      Sys_unix.ls_dir s |> List.concat_map ~f:(fun sub -> ls_rec (Filename.concat s sub));;
+      Sys_unix.ls_dir s |> List.concat_map ~f:(fun sub -> ls_rec (Filename.concat s sub))
+  in
   List.iter (ls_rec "./src") ~f:print_endline;
 
   printf "[";
   List.iter (remove_dup [1; 2; 3; 5; 5; 9; 9]) ~f:(printf " %d");
   printf " ]\n";
-
   printf "[";
   List.iter (remove_dup [1.0; 2.0]) ~f:(printf " %f");
   printf " ]\n";
+
+  (* Very verbose way of changing Options *)
+  let _compute_bounds ~compare list =
+    let sorted = List.sort ~compare list in
+    Option.bind (List.hd sorted) ~f:(fun first ->
+      Option.bind (List.last sorted) ~f:(fun last ->
+        Some (first,last)))
+  in
+  (* Much less verbose way of doing the same thing *)
+  let compute_bounds ~compare list =
+    let open Option.Let_syntax in
+    let sorted = List.sort ~compare list in
+    let%bind first = List.hd sorted in
+    let%bind last = List.last sorted in
+    Some (first, last)
+  in
+  let lst = [5.; 100.; 2.; 100.; 30.] in
+  let low, high = compute_bounds ~compare:Float.compare lst |> Option.value_exn in
+  printf "low: %.02f high: %.02f\n" low high;
+  (* Haven't realized if %string is worth using *)
+  let result = 10 in
+  print_endline [%string "result: %{result#Int}"]
 ;;
 
 let readme () =
