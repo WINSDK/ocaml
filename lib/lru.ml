@@ -29,9 +29,9 @@ let push_node t node =
 ;;
 
 let remove_node t node =
-  if Option.exists t.head ~f:(fun head -> equal_node t.equal node head)
+  if Option.exists t.head ~f:(fun head -> t.equal node.value head.value)
   then t.head <- node.next;
-  if Option.exists t.tail ~f:(fun tail -> equal_node t.equal node tail)
+  if Option.exists t.tail ~f:(fun tail -> t.equal node.value tail.value)
   then t.tail <- node.prev;
   Option.iter node.prev ~f:(fun prev -> prev.next <- node.next);
   Option.iter node.next ~f:(fun next -> next.prev <- node.prev)

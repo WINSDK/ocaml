@@ -372,6 +372,25 @@ module Thing = struct
   let create ?(x = 10) ?(y = "name") () = { x; y };;
 end
 
+let use_lru_fibonacci () =
+  let fib_cache = Lru.create ~size:5 (module Int) (module Int) in
+  let fibonacci n =
+    let rec aux n a b = if n = 0 then a else aux (n - 1) b (a + b) in
+    aux n 0 1
+  in
+  let cached_fibonacci n =
+    match Lru.get fib_cache n with
+    | Some result -> printf "Cache hit for n = %d: %d\n" n result; result
+    | None -> 
+      let result = fibonacci n in
+      Lru.put fib_cache n result;
+      printf "Cache miss for n = %d\n" n; 
+      result
+  in
+  List.iter [5; 10; 5; 20; 10; 25; 5] ~f:(fun n ->
+      printf "Fibonacci(%d) = %d\n" n (cached_fibonacci n))
+;;
+
 let main () =
   let arr = [|1; 3; 5|] in
   (*
@@ -412,7 +431,7 @@ let main () =
     else
       Sys_unix.ls_dir s |> List.concat_map ~f:(fun sub -> ls_rec (Filename.concat s sub))
   in
-  List.iter (ls_rec "./src") ~f:print_endline;
+  List.iter (ls_rec "./lib") ~f:print_endline;
 
   printf "[";
   List.iter (remove_dup [1; 2; 3; 5; 5; 9; 9]) ~f:(printf " %d");
@@ -441,6 +460,8 @@ let main () =
   printf "low: %.02f high: %.02f\n" low high;
   (* How to debug print any expression *)
   printf !"%{sexp: Thing.t}\n%!" (Thing.create ());
+  printf "\n";
+  use_lru_fibonacci ();
 ;;
 
 let readme () =

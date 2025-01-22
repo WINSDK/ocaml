@@ -6,3 +6,12 @@
  (preprocess
    (pps ppx_bench))
  (ocamlopt_flags (:standard -O3)))
+
+(library
+ (name bench_lru)
+ (modules bench_lru)
+ (libraries problems core core_bench.inline_benchmarks)
+ (library_flags -linkall)
+ (preprocess
+   (pps ppx_bench))
+ (ocamlopt_flags (:standard -O3)))

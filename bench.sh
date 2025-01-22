@@ -77,5 +77,8 @@ setup_runner;
 export BENCHMARKS_RUNNER=TRUE
 
 # Filter out broken warning from stderr.
-dune exec --release -- "./bench/main.exe" -run-without-cross-library-inlining "$@" \
-    2>&1 | grep -v "Warning: X_LIBRARY_INLINING is not set to true"
+dune exec --release -- "./bench/main.exe" \
+    -run-without-cross-library-inlining \
+    -warnings-to-stdout \
+    "$@" \
+    | grep -v "Warning: X_LIBRARY_INLINING is not set to true"
