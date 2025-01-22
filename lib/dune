@@ -1,7 +1,7 @@
-(executable
- (public_name problems)
+(library
  (name problems)
- (libraries base core core_unix.command_unix core_unix.time_float_unix stdio)
+ (libraries core core_unix.time_float_unix core_unix.sys_unix stdio)
+ (inline_tests)
  (preprocess
   (pps ppx_jane))
  (lint

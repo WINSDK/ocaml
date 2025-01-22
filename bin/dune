@@ -1,0 +1,6 @@
+(executable
+ (name main)
+ (libraries problems core core_unix.command_unix))
+(env
+ (release
+  (ocamlopt_flags (:standard -O3))))

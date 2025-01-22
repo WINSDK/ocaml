@@ -1,15 +1,1 @@
 (lang dune 3.17)
-(name problems)
-(generate_opam_files true)
-(source
- (github username/reponame))
-(authors "Nicolas Mazzon <nicolas@careful.observer>")
-(maintainers "Nicolas Mazzon <nicolas@careful.observer>")
-(license LICENSE)
-(documentation https://url/to/documentation)
-(package
- (name problems)
- (synopsis "A short synopsis")
- (description "A longer description")
- (depends ocaml dune)
- (tags ("add topics" "to describe" your project)))

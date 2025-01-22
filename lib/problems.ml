@@ -1,6 +1,8 @@
 open !Core
 open Stdio
 
+module Lru = Lru
+
 (*
   Watch & Reading list:
   *
@@ -46,6 +48,10 @@ open Stdio
 
   Probably use one monorepo for everything:
   https://blog.janestreet.com/ironing-out-your-development-style/
+
+  How to use flambda switch:
+    * opam switch create 5.2.0+flambda2 --repos with-extensions=git+https://github.com/janestreet/opam-repository.git#with-extensions,default
+    * opam switch set 5.2.0+flambda2
 *)
 
 (* Any kind of time operations using jane street's libs require this. *)
@@ -92,12 +98,11 @@ let rec length xs =
     | _ :: xs -> length xs + 1;;
 
 let rev xs =
-  let rec aux acc =
-    match acc with
-      | [] -> acc
-      | x :: xs -> aux (x :: acc) @ xs
+  let rec aux acc = function
+    | [] -> acc
+    | x :: xs -> aux (x :: acc) xs
   in
-  aux xs;;
+  aux [] xs;;
 
 let is_palindrome (xs: 'a list) = Poly.(List.rev xs = xs);;
 
@@ -434,9 +439,8 @@ let main () =
   let lst = [5.; 100.; 2.; 100.; 30.] in
   let low, high = compute_bounds ~compare:Float.compare lst |> Option.value_exn in
   printf "low: %.02f high: %.02f\n" low high;
-  (* Haven't realized if %string is worth using *)
-  let result = 10 in
-  print_endline [%string "result: %{result#Int}"]
+  (* How to debug print any expression *)
+  printf !"%{sexp: Thing.t}\n%!" (Thing.create ());
 ;;
 
 let readme () =
@@ -452,5 +456,3 @@ let command =
     ~readme
     (Command.Param.return main)
 ;;
-
-let () = Command_unix.run command
