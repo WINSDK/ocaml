@@ -46,12 +46,31 @@ module Lru = Lru
     * opam install opam-dune-lint
     * exec opam-dune-lint in project base directory
 
+
+  gitignore:
+  ```
+  _build/
+  *.opam
+  ```
+
   Probably use one monorepo for everything:
   https://blog.janestreet.com/ironing-out-your-development-style/
 
   How to use flambda switch:
     * opam switch create 5.2.0+flambda2 --repos with-extensions=git+https://github.com/janestreet/opam-repository.git#with-extensions,default
     * opam switch set 5.2.0+flambda2
+
+  ### Monorepo
+
+    Have one switch for all projects in the monorepo:
+      * opam switch create . ocaml-base-compiler
+    Build all it's dependencies:
+      * opam install . --deps-only
+    Build + test all executables/libraries
+      * dune build @all
+      * dune test
+    How to add new dependency
+      * dependencies.opam
 *)
 
 (* Any kind of time operations using jane street's libs require this. *)
@@ -146,12 +165,19 @@ let rec duplicate xs =
 
 let rec remove_dup = function
   | [] | [_] as l -> l (* Avoid allocation by returning original list *)
-  (*
-    (=) is an int comparison in Core, so `remove_dup` will specialize to int list.
-    Therefore we use Poly.(x = y) for polymorphic comparison to keep `remove_dup` generic.
-  *)
+  (* (=) is an int comparison in Core, so `remove_dup` will specialize to int list.
+     Therefore we use Poly.(x = y) for polymorphic comparison to keep `remove_dup` generic. *)
   | x :: (y :: _ as tl) when Poly.(x = y) -> remove_dup tl
   | x :: tl -> x :: remove_dup tl
+;;
+
+(* Version of `remove_dup` that doesn't use poly comparisons.
+   This is only written like this because we use recursion. *)
+let rec remove_dup2 : type a. (module Comparable.S with type t = a) -> a list -> a list =
+  fun (module Compare) -> function
+  | [] | [_] as l -> l
+  | x :: (y :: _ as tl) when Compare.(x = y) -> remove_dup2 (module Compare) tl
+  | x :: tl -> x :: remove_dup2 (module Compare) tl
 ;;
 
 let remove_at idx xs =
@@ -373,18 +399,21 @@ module Thing = struct
 end
 
 let use_lru_fibonacci () =
-  let fib_cache = Lru.create ~size:5 (module Int) (module Int) in
+  let module M = Lru.Make(Int) in
+  let cache = M.create ~size:5 () in
   let fibonacci n =
     let rec aux n a b = if n = 0 then a else aux (n - 1) b (a + b) in
     aux n 0 1
   in
   let cached_fibonacci n =
-    match Lru.get fib_cache n with
+    match M.get cache n with
     | Some result -> printf "Cache hit for n = %d: %d\n" n result; result
     | None -> 
       let result = fibonacci n in
-      Lru.put fib_cache n result;
+      M.add cache ~key:n ~data:result;
       printf "Cache miss for n = %d\n" n; 
+      print_s [%sexp (cache : int M.t)];
+      printf "\n";
       result
   in
   List.iter [5; 10; 5; 20; 10; 25; 5] ~f:(fun n ->
@@ -460,8 +489,30 @@ let main () =
   printf "low: %.02f high: %.02f\n" low high;
   (* How to debug print any expression *)
   printf !"%{sexp: Thing.t}\n%!" (Thing.create ());
+  print_s [%sexp (Thing.create ()  : Thing.t)];
   printf "\n";
   use_lru_fibonacci ();
+
+  (* Operations on a monad *)
+  let x = Option.return 100 in
+  let x = Option.map x ~f:(fun x -> Int.pow x 2) in
+  let _x = Option.bind x ~f:(fun x -> if x < 0 then Some (-x) else None) in (* Just like rust's Option.and_then *)
+
+  (* Operations on a monad using core's Let_syntax *)
+  let _: int option =
+    let open Option.Let_syntax in
+    let%bind x = Some 10 in
+    let%bind y = None in (* This will short circuit to the last line *)
+    printf ":) %d\n" (x * y);
+    None
+  in
+  let _: int option =
+    let open Option.Let_syntax in
+    let%map x = Some 10 and y = Some 20 in
+    printf ":) %d\n" (x * y); (* this will now print 200 *)
+    100
+  in
+  ()
 ;;
 
 let readme () =

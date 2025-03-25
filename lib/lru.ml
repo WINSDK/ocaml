@@ -1,122 +1,130 @@
 open Core
+include Lru_intf
 
-(* Key must implement compare, sexp, hash *)
-(* Value must implement compare *)
-type 'v node =
-  { mutable value : 'v
-  ; mutable prev : 'v node option
-  ; mutable next : 'v node option
-  }
-[@@deriving equal, compare, sexp]
+module Make (K : K) = struct
+  module Table = Hashtbl.Make_plain (K)
 
-type ('k, 'v) t =
-  { mapping : ('k, 'v node) Hashtbl.t
-  ; mutable head : 'v node option
-  ; mutable tail : 'v node option
-  ; equal : 'v -> 'v -> bool
-  ; capacity : int
-  }
+  type key = K.t
 
-let push_node t node =
-  match t.head with
-  | None ->
-    t.head <- Some node;
-    t.tail <- Some node
-  | Some head ->
-    t.head <- Some node;
-    node.prev <- Some head;
-    head.next <- Some node
-;;
+  type 'a node =
+    { mutable data : 'a
+    ; mutable prev : 'a node ref option
+    ; mutable next : 'a node ref option
+    }
+  [@@deriving sexp_of, compare]
 
-let remove_node t node =
-  if Option.exists t.head ~f:(fun head -> t.equal node.value head.value)
-  then t.head <- node.next;
-  if Option.exists t.tail ~f:(fun tail -> t.equal node.value tail.value)
-  then t.tail <- node.prev;
-  Option.iter node.prev ~f:(fun prev -> prev.next <- node.next);
-  Option.iter node.next ~f:(fun next -> next.prev <- node.prev)
-;;
+  type 'a t =
+    { mapping : 'a node ref Table.t
+    ; mutable head : 'a node ref option
+    ; mutable tail : 'a node ref option
+    ; capacity : int
+    }
 
-let create ~size m_key m_value =
-  let compare = (Base.Hashable.of_key m_value).compare in
-  let equal x y = compare x y = 0 in
-  { mapping = Hashtbl.create ~size m_key
-  ; head = None
-  ; tail = None
-  ; equal
-  ; capacity = size
-  }
-;;
+  let sexp_of_t sexp_of_v t =
+    Hashtbl.to_alist t.mapping
+    |> sexp_of_list (fun (k, node) ->
+      let v = !node.data in
+      Sexp.(List [ K.sexp_of_t k; sexp_of_v v ]))
+  ;;
 
-let get t key =
-  match Hashtbl.find t.mapping key with
-  | Some node ->
-    remove_node t node;
-    push_node t node;
-    Some node.value
-  | None -> None
-;;
+  let push_node t node =
+    match t.head with
+    | None ->
+      t.head <- Some node;
+      t.tail <- Some node
+    | Some head ->
+      t.head <- Some node;
+      !node.prev <- Some head;
+      !head.next <- Some node
+  ;;
 
-let put (t : ('k, 'v) t) key value =
-  match t.tail, Hashtbl.length t.mapping with
-  | Some tail, size when size = t.capacity ->
-    remove_node t tail;
-    Hashtbl.remove t.mapping key
-  | _ ->
-    (match Hashtbl.find t.mapping key with
-     | Some node ->
-       node.value <- value;
-       remove_node t node;
-       push_node t node
-     | None ->
-       let node = { value; prev = None; next = None } in
-       push_node t node;
-       Hashtbl.add_exn t.mapping ~key ~data:node)
-;;
+  let remove_node t node =
+    if Option.exists t.head ~f:(phys_equal node) then t.head <- !node.next;
+    if Option.exists t.tail ~f:(phys_equal node) then t.tail <- !node.prev;
+    Option.iter !node.prev ~f:(fun prev -> !prev.next <- !node.next);
+    Option.iter !node.next ~f:(fun next -> !next.prev <- !node.prev)
+  ;;
 
-let length t = Hashtbl.length t.mapping
+  let create ~size () =
+    { mapping = Table.create ~size (); head = None; tail = None; capacity = size }
+  ;;
+
+  let get t key =
+    match Hashtbl.find t.mapping key with
+    | Some node ->
+      remove_node t node;
+      push_node t node;
+      Some !node.data
+    | None -> None
+  ;;
+
+  let length t = Hashtbl.length t.mapping
+
+  let add t ~key ~data =
+    match t.tail, Hashtbl.length t.mapping with
+    | Some tail, size when size = t.capacity ->
+      remove_node t tail;
+      Hashtbl.remove t.mapping key
+    | _ ->
+      (match Hashtbl.find t.mapping key with
+       | Some node ->
+         !node.data <- data;
+         remove_node t node;
+         push_node t node
+       | None ->
+         let node = ref { data; prev = None; next = None } in
+         push_node t node;
+         Hashtbl.add_exn t.mapping ~key ~data:node)
+  ;;
+end
+
+module M = Make (struct
+    type t = int [@@deriving compare, hash, sexp_of]
+  end)
 
 let%test_unit "create creates an empty cache" =
-  let cache = create ~size:10 (module Int) (module Int) in
-  [%test_result: int] (Hashtbl.length cache.mapping) ~expect:0;
-  [%test_result: int node option] cache.head ~expect:None;
-  [%test_result: int node option] cache.tail ~expect:None
+  let cache = M.create ~size:10 () in
+  [%test_result: int] (M.length cache) ~expect:0;
+  [%test_result: int M.node ref option] cache.head ~expect:None;
+  [%test_result: int M.node ref option] cache.tail ~expect:None
 ;;
 
-let%expect_test "put and get a single value" =
-  let cache = create ~size:10 (module Int) (module String) in
-  put cache 1 "value1";
-  let result = get cache 1 in
+let%expect_test "add and get a single value" =
+  let cache = M.create ~size:10 () in
+  M.add cache ~key:1 ~data:"value1";
+  let result = M.get cache 1 in
   print_s [%sexp (result : string option)];
   [%expect {| (value1) |}]
 ;;
 
-let%expect_test "put and get multiple values" =
-  let cache = create ~size:10 (module Int) (module String) in
-  put cache 1 "value1";
-  put cache 2 "value2";
-  let result1 = get cache 1 in
-  let result2 = get cache 2 in
+let%expect_test "add and get multiple values" =
+  let cache = M.create ~size:10 () in
+  M.add cache ~key:1 ~data:"value1";
+  M.add cache ~key:2 ~data:"value2";
+  let result1 = M.get cache 1 in
+  let result2 = M.get cache 2 in
   print_s [%sexp (result1 : string option)];
   print_s [%sexp (result2 : string option)];
-  [%expect {|
+  [%expect
+    {|
     (value1)
     (value2)
   |}]
 ;;
 
-let%expect_test "put evicts the oldest value when capacity is reached" =
-  let cache = create ~size:2 (module Int) (module String) in
-  put cache 1 "value1";
-  put cache 2 "value2";
-  put cache 3 "value3";
-  let result1 = get cache 1 in
-  let result2 = get cache 2 in
-  let result3 = get cache 3 in
+let%expect_test "add evicts the oldest value when capacity is reached" =
+  let cache = M.create ~size:2 () in
+  M.add cache ~key:1 ~data:"value1";
+  M.add cache ~key:2 ~data:"value2";
+  M.add cache ~key:3 ~data:"value3";
+  let result1 = M.get cache 1 in
+  let result2 = M.get cache 2 in
+  let result3 = M.get cache 3 in
   print_s [%sexp (result1 : string option)];
   print_s [%sexp (result2 : string option)];
   print_s [%sexp (result3 : string option)];
-  [%expect {|
+  [%expect
+    {|
     (value1)
     (value2)
     ()
@@ -124,24 +132,24 @@ let%expect_test "put evicts the oldest value when capacity is reached" =
 ;;
 
 let%expect_test "get moves the accessed node to the head" =
-  let cache = create ~size:3 (module Int) (module String) in
-  put cache 1 "value1";
-  put cache 2 "value2";
-  put cache 3 "value3";
-  let _ = get cache 2 in
-  let head_value = Option.map cache.head ~f:(fun h -> h.value) in
+  let cache = M.create ~size:3 () in
+  M.add cache ~key:1 ~data:"value1";
+  M.add cache ~key:2 ~data:"value2";
+  M.add cache ~key:3 ~data:"value3";
+  let _ = M.get cache 2 in
+  let head_value = Option.map cache.head ~f:(fun h -> !h.data) in
   print_s [%sexp (head_value : string option)];
   [%expect {| (value2) |}];
-  let tail_value = Option.map cache.tail ~f:(fun h -> h.value) in
+  let tail_value = Option.map cache.tail ~f:(fun h -> !h.data) in
   print_s [%sexp (tail_value : string option)];
   [%expect {| (value1) |}]
 ;;
 
-let%expect_test "put updates the value if the key already exists" =
-  let cache = create ~size:3 (module Int) (module String) in
-  put cache 1 "value1";
-  put cache 1 "new_value1";
-  let result = get cache 1 in
+let%expect_test "add updates the value if the key already exists" =
+  let cache = M.create ~size:3 () in
+  M.add cache ~key:1 ~data:"value1";
+  M.add cache ~key:1 ~data:"new_value1";
+  let result = M.get cache 1 in
   print_s [%sexp (result : string option)];
   [%expect {| (new_value1) |}]
 ;;
